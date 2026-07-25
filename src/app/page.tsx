@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -64,6 +64,29 @@ export default function HomePage() {
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
 
   // Listeners for cross-tab triggers
+  const handleSearchCenters = useCallback(async (cityVal = citySearch, specialtyVal = specialtySearch) => {
+    setIsSearching(true);
+    try {
+      const queryParams = new URLSearchParams({
+        city: cityVal,
+        ...(specialtyVal && { specialty: specialtyVal }),
+      });
+      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
+      if (!res.ok) throw new Error("Error en la búsqueda de centros");
+      const data = await res.json();
+      if (data.centers && data.centers.length > 0) {
+        setCenters(data.centers);
+      } else {
+        setCenters([]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [citySearch, specialtySearch]);
+
+  // Listeners for cross-tab triggers
   useEffect(() => {
     const handleAgentSearch = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -84,29 +107,7 @@ export default function HomePage() {
       window.removeEventListener("search-health-centers", handleAgentSearch);
       window.removeEventListener("trigger-wallet-payment", handleTriggerWallet);
     };
-  }, []);
-
-  const handleSearchCenters = async (cityVal = citySearch, specialtyVal = specialtySearch) => {
-    setIsSearching(true);
-    try {
-      const queryParams = new URLSearchParams({
-        city: cityVal,
-        ...(specialtyVal && { specialty: specialtyVal }),
-      });
-      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
-      if (!res.ok) throw new Error("Error en la búsqueda de centros");
-      const data = await res.json();
-      if (data.centers && data.centers.length > 0) {
-        setCenters(data.centers);
-      } else {
-        setCenters([]);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  }, [handleSearchCenters]);
 
   const handleGenerateSummary = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -361,7 +362,7 @@ export default function HomePage() {
                     <div className="text-center space-y-2">
                       <ImageIcon className="h-10 w-10 text-muted-foreground/60 mx-auto" />
                       <p className="text-xs text-muted-foreground">
-                        Escribe el triage clínico en el panel izquierdo y haz clic en "Generar Infografía" para visualizar.
+                        Escribe el triage clínico en el panel izquierdo y haz clic en &quot;Generar Infografía&quot; para visualizar.
                       </p>
                     </div>
                   )}

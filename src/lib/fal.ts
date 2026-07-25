@@ -29,8 +29,9 @@ export class FalClient {
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey ?? FAL_API_KEY ?? "";
-    if (!this.apiKey) {
-      console.warn("[SanaIA] FAL_API_KEY no configurada.");
+    if (!this.apiKey || this.apiKey.startsWith("your-")) {
+      console.warn("[SanaIA] FAL_API_KEY no configurada o de prueba.");
+      this.apiKey = "";
     }
   }
 

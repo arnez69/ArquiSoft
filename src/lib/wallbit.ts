@@ -25,8 +25,9 @@ export class WallbitClient {
     this.apiKey = apiKey ?? WALLBIT_API_KEY ?? "";
     this.baseUrl = baseUrl ?? WALLBIT_BASE_URL;
 
-    if (!this.apiKey) {
-      console.warn("[SanaIA] WALLBIT_API_KEY no configurada. Modo mock activo.");
+    if (!this.apiKey || this.apiKey.startsWith("your-")) {
+      console.warn("[SanaIA] WALLBIT_API_KEY no configurada o de prueba. Modo mock activo.");
+      this.apiKey = "";
     }
   }
 

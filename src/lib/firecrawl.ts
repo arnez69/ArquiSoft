@@ -20,8 +20,9 @@ export class FirecrawlClient {
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey ?? FIRECRAWL_API_KEY ?? "";
-    if (!this.apiKey) {
-      console.warn("[SanaIA] FIRECRAWL_API_KEY no configurada.");
+    if (!this.apiKey || this.apiKey.startsWith("your-")) {
+      console.warn("[SanaIA] FIRECRAWL_API_KEY no configurada o de prueba.");
+      this.apiKey = "";
     }
   }
 
@@ -60,8 +61,9 @@ export class ExaClient {
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey ?? EXA_API_KEY ?? "";
-    if (!this.apiKey) {
-      console.warn("[SanaIA] EXA_API_KEY no configurada.");
+    if (!this.apiKey || this.apiKey.startsWith("your-")) {
+      console.warn("[SanaIA] EXA_API_KEY no configurada o de prueba.");
+      this.apiKey = "";
     }
   }
 

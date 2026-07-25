@@ -21,8 +21,9 @@ export class ZavuClient {
     this.apiKey = apiKey ?? ZAVU_API_KEY ?? "";
     this.baseUrl = baseUrl ?? ZAVU_BASE_URL;
 
-    if (!this.apiKey) {
-      console.warn("[SanaIA] ZAVU_API_KEY no configurada. El agente funcionará en modo mock.");
+    if (!this.apiKey || this.apiKey.startsWith("your-")) {
+      console.warn("[SanaIA] ZAVU_API_KEY no configurada o de prueba. El agente funcionará en modo mock.");
+      this.apiKey = "";
     }
   }
 

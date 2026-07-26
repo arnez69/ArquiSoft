@@ -24,9 +24,39 @@ interface TriageState {
   painIndex?: number;
   painType?: string;
   foods?: string;
+  department?: string;
   severity?: "Emergencia" | "Urgencia" | "No urgente";
   presumptiveDiagnosis?: string;
   userName?: string;
+}
+
+export function departmentActions(): AgentAction[] {
+  return [
+    { type: "select_department", label: "La Paz", payload: { department: "La Paz" } },
+    { type: "select_department", label: "Santa Cruz", payload: { department: "Santa Cruz" } },
+    { type: "select_department", label: "Cochabamba", payload: { department: "Cochabamba" } },
+    { type: "select_department", label: "Oruro", payload: { department: "Oruro" } },
+    { type: "select_department", label: "Potosí", payload: { department: "Potosí" } },
+    { type: "select_department", label: "Tarija", payload: { department: "Tarija" } },
+    { type: "select_department", label: "Chuquisaca", payload: { department: "Chuquisaca" } },
+    { type: "select_department", label: "Beni", payload: { department: "Beni" } },
+    { type: "select_department", label: "Pando", payload: { department: "Pando" } },
+  ];
+}
+
+export function hospitalTypeActions(department: string): AgentAction[] {
+  return [
+    {
+      type: "select_hospital_type",
+      label: "🏥 Hospital Público",
+      payload: { department, hospitalType: "Público" },
+    },
+    {
+      type: "select_hospital_type",
+      label: "🏥 Clínica Privada",
+      payload: { department, hospitalType: "Privado" },
+    },
+  ];
 }
 
 const mockSessions = new Map<string, TriageState>();
@@ -120,6 +150,17 @@ function hasSymptoms(text: string): boolean {
   return SYMPTOM_KEYWORDS.some((k) => n.includes(normalize(k))) || n.length > 25;
 }
 
+function isSymptomIntent(msgNorm: string): boolean {
+  return (
+    msgNorm.includes("contarte mis sintomas") ||
+    msgNorm.includes("tengo sintomas") ||
+    msgNorm.includes("no me siento bien") ||
+    msgNorm.includes("dolor o malestar") ||
+    msgNorm.includes("tengo sintomas que contar") ||
+    msgNorm.includes("si, tengo sintomas")
+  );
+}
+
 function matchDiseaseAdvice(text: string): { advice: string; severity: TriageState["severity"] } | null {
   for (const { pattern, advice, severity } of DISEASE_PATTERNS) {
     if (pattern.test(text)) return { advice, severity };
@@ -141,10 +182,32 @@ function buildMetadata(state: TriageState) {
   };
 }
 
-function hospitalActions(city = "La Paz"): AgentAction[] {
+function extractDepartment(text: string): string | null {
+  const n = normalize(text);
+  if (n.includes("la paz")) return "La Paz";
+  if (n.includes("santa cruz")) return "Santa Cruz";
+  if (n.includes("cochabamba")) return "Cochabamba";
+  if (n.includes("oruro")) return "Oruro";
+  if (n.includes("potosi") || n.includes("potosí")) return "Potosí";
+  if (n.includes("tarija")) return "Tarija";
+  if (n.includes("chuquisaca") || n.includes("sucre")) return "Chuquisaca";
+  if (n.includes("beni") || n.includes("trinidad")) return "Beni";
+  if (n.includes("pando") || n.includes("cobija")) return "Pando";
+  return null;
+}
+
+function hospitalActions(department = "La Paz"): AgentAction[] {
   return [
-    { type: "find_hospital", label: "Ver centros médicos cercanos", payload: { city } },
-    { type: "check_wallet", label: "Revisar billetera de emergencias", payload: {} },
+    {
+      type: "select_hospital_type",
+      label: "🏥 Hospital Público",
+      payload: { department, hospitalType: "Público" },
+    },
+    {
+      type: "select_hospital_type",
+      label: "🏥 Clínica Privada",
+      payload: { department, hospitalType: "Privado" },
+    },
   ];
 }
 
@@ -212,8 +275,43 @@ export class ZavuClient {
     const msg = request.message.trim();
     const msgNorm = normalize(msg);
 
-    // Acciones disparadas por botones de la UI
-    if (msgNorm.includes("contarte mis sintomas") || msgNorm.includes("contarte mis síntomas") || msgNorm === "tengo sintomas" || msgNorm === "no me siento bien") {
+    // Saludo o reinicio durante un triage activo → conversación limpia (evita que "hola" = dolor 5/10)
+    if (
+      (isGreeting(msg) || msgNorm === "hola" || msgNorm === "hi") &&
+      state.step !== "greeting"
+    ) {
+      state = { step: "greeting" };
+      mockSessions.set(request.sessionId, state);
+      return this.reply(
+        request,
+        state,
+        "¡Hola de nuevo! 👋 Reiniciemos la conversación.\n\n" +
+          "Soy **SanaIA**, tu asistente de salud. Cuéntame, ¿cómo te sientes hoy o en qué puedo ayudarte?",
+        [
+          { type: "start_symptoms", label: "No me siento bien", payload: {} },
+          { type: "start_symptoms", label: "Tengo dolor o malestar", payload: {} },
+          { type: "find_hospital", label: "Buscar centro médico", payload: {} },
+          { type: "general_info", label: "Consejos de salud", payload: {} },
+        ]
+      );
+    }
+
+    // Detección directa de departamento
+    const detectedDept = extractDepartment(msg);
+    if (detectedDept) {
+      state.department = detectedDept;
+      mockSessions.set(request.sessionId, state);
+      return this.reply(
+        request,
+        state,
+        `📍 Entendido, he registrado que estás en **${detectedDept}**.\n\n` +
+        `¿Qué tipo de centro médico prefieres consultar en el Mapa GPS? Haz clic en una de las siguientes opciones para ir directamente:`,
+        hospitalTypeActions(detectedDept)
+      );
+    }
+
+    // Acciones disparadas por botones de la UI — reconocer el texto visible del botón
+    if (isSymptomIntent(msgNorm)) {
       state.step = "awaiting_symptoms";
       mockSessions.set(request.sessionId, state);
       return this.reply(request, state,
@@ -241,7 +339,7 @@ export class ZavuClient {
         "¿Tienes algún síntoma que te preocupe?",
         [
           { type: "start_symptoms", label: "Sí, tengo síntomas", payload: {} },
-          { type: "find_hospital", label: "Agendar chequeo médico", payload: { city: "La Paz" } },
+          { type: "find_hospital", label: "Agendar chequeo médico", payload: {} },
         ]
       );
     }
@@ -252,11 +350,19 @@ export class ZavuClient {
       return this.askPainIndex(request, state);
     }
 
-    if (msgNorm.includes("centro medico cercano") || msgNorm.includes("centro médico cercano")) {
+    if (msgNorm.includes("centro medico") || msgNorm.includes("centro médico") || msgNorm.includes("buscar centro") || msgNorm.includes("hospital") || msgNorm.includes("clinica")) {
+      const currentDept = state.department;
+      if (currentDept) {
+        return this.reply(
+          request,
+          state,
+          `📍 Para tu departamento (**${currentDept}**), ¿qué tipo de centro médico deseas ver en el mapa GPS?`,
+          hospitalTypeActions(currentDept)
+        );
+      }
       return this.reply(request, state,
-        "Te ayudo a encontrar centros de salud disponibles. Revisa el panel de **Centros de salud** a la derecha, o dime tu ciudad para buscar opciones cercanas.\n\n" +
-        "Si es una emergencia, llama al **110** de inmediato.",
-        hospitalActions()
+        "📍 Para mostrarte los centros de salud disponibles en el Mapa GPS, por favor dinos **¿en qué departamento de Bolivia te encuentras?**",
+        departmentActions()
       );
     }
 
@@ -268,7 +374,7 @@ export class ZavuClient {
         "¡Perfecto! Empecemos de nuevo. 😊\n\nSoy SanaIA, tu asistente de salud. Estoy aquí para orientarte con síntomas, consejos médicos y ayudarte a encontrar el centro de salud más adecuado en Bolivia.\n\n¿En qué puedo ayudarte hoy?",
         [
           { type: "start_symptoms", label: "Tengo síntomas", payload: {} },
-          { type: "find_hospital", label: "Buscar centro médico", payload: { city: "La Paz" } },
+          { type: "find_hospital", label: "Buscar centro médico", payload: {} },
           { type: "general_info", label: "Consejos de salud general", payload: {} },
         ]
       );
@@ -383,6 +489,19 @@ export class ZavuClient {
     }
 
     if (state.step === "pain_index") {
+      if (isGreeting(msg) || !/\b([1-9]|10)\b/.test(msg)) {
+        return this.reply(
+          request,
+          state,
+          "Para continuar el triage, indícame un número del **1 al 10** según la intensidad de tu dolor o malestar.\n\n" +
+            "_Si prefieres empezar de nuevo, escribe **hola** o pulsa Nueva Consulta._",
+          [
+            { type: "input_pain", label: "Leve (1-3)", payload: { value: 2 } },
+            { type: "input_pain", label: "Moderado (4-7)", payload: { value: 6 } },
+            { type: "input_pain", label: "Severo (8-10)", payload: { value: 9 } },
+          ]
+        );
+      }
       const matches = msg.match(/\b([1-9]|10)\b/);
       const parsedIndex = matches ? parseInt(matches[1], 10) : 5;
       state.painIndex = parsedIndex;
@@ -414,11 +533,11 @@ export class ZavuClient {
     }
 
     if (state.step === "completed") {
+      const dept = state.department || "La Paz";
       return this.reply(request, state,
-        "Ya completamos tu evaluación. Si tienes **nuevos síntomas** o la situación empeora, inicia una nueva consulta.\n\n" +
-        "Recuerda: esta orientación **no reemplaza** una consulta médica presencial.",
+        "Ya completamos tu evaluación. Si deseas ver los centros de salud disponibles en el Mapa GPS, selecciona tu preferencia:",
         [
-          ...hospitalActions(),
+          ...hospitalActions(dept),
           { type: "restart_triage", label: "Nueva consulta", payload: {} },
         ]
       );
@@ -563,11 +682,11 @@ export class ZavuClient {
       "• Evita automedicarte antes de la consulta\n" +
       "• Lleva esta evaluación al médico como referencia\n" +
       "• Mantente hidratado y en reposo\n\n" +
-      "¿Te muestro los centros médicos disponibles cerca de ti?";
+      "📍 Para buscar centros médicos en el mapa GPS, **¿en qué departamento te encuentras?**";
 
     mockSessions.set(request.sessionId, state);
     return this.reply(request, state, content, [
-      ...hospitalActions(),
+      ...departmentActions(),
       { type: "generate_infographic", label: "Generar resumen visual", payload: { prompt: `Triage ${state.severity}: ${state.presumptiveDiagnosis}. Dolor ${state.painIndex}/10.` } },
       { type: "restart_triage", label: "Nueva consulta", payload: {} },
     ]);

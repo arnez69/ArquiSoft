@@ -3,16 +3,32 @@
  * Dev 4: poblar desde Firecrawl/Exa y normalizar aquí.
  */
 
+export type BoliviaDepartment =
+  | "La Paz"
+  | "Santa Cruz"
+  | "Cochabamba"
+  | "Oruro"
+  | "Potosí"
+  | "Tarija"
+  | "Chuquisaca"
+  | "Beni"
+  | "Pando";
+
+export type HospitalType = "Público" | "Privado" | "Seguro Social (CNS)";
+
 export interface HealthCenter {
   id: string;
   name: string;
   address: string;
   city: string;
+  department: BoliviaDepartment;
+  type: HospitalType;
   latitude: number;
   longitude: number;
   occupancyPercent: number;
   services: string[];
   phone?: string;
+  phoneEmergency?: string;
   sourceUrl?: string;
   lastUpdated: string;
 }

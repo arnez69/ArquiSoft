@@ -22,47 +22,23 @@ import {
 } from "lucide-react";
 import { AgentChatPlaceholder } from "@/components/agent/agent-chat-placeholder";
 import { HealthCenterCard } from "@/components/health/health-center-card";
+import { MapWrapper } from "@/components/health/map-wrapper";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { WalletCard } from "@/components/wallet/wallet-card";
 import { Input } from "@/components/ui/input";
-import type { HealthCenter } from "@/types/health";
-
-const INITIAL_DEMO_CENTERS: HealthCenter[] = [
-  {
-    id: "hc_1",
-    name: "Hospital del Norte",
-    address: "Av. Costanera 120",
-    city: "La Paz",
-    latitude: -16.4897,
-    longitude: -68.1193,
-    occupancyPercent: 42,
-    services: ["urgencias", "UCI", "pediatría"],
-    sourceUrl: "https://www.hospitaldelnorte.com.bo",
-    lastUpdated: new Date().toISOString(),
-  },
-  {
-    id: "hc_2",
-    name: "Clínica San Gabriel",
-    address: "Calle 6 de Agosto 450",
-    city: "La Paz",
-    latitude: -16.5001,
-    longitude: -68.1342,
-    occupancyPercent: 78,
-    services: ["consulta general", "laboratorio"],
-    sourceUrl: "https://www.clinicasangrabriel.com.bo",
-    lastUpdated: new Date().toISOString(),
-  },
-];
+import type { HealthCenter, BoliviaDepartment, HospitalType } from "@/types/health";
+import { BOLIVIA_HOSPITALS, BOLIVIA_DEPARTMENTS_CONFIG } from "@/data/bolivia-hospitals";
 
 type ActiveTab = "home" | "triage" | "wallet" | "health-centers" | "visual-summary";
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("home");
-  const [centers, setCenters] = useState<HealthCenter[]>(INITIAL_DEMO_CENTERS);
-  const [citySearch, setCitySearch] = useState("La Paz");
-  const [specialtySearch, setSpecialtySearch] = useState("");
-  const [isSearching, setIsSearching] = useState(false);
+  const [centers, setCenters] = useState<HealthCenter[]>(BOLIVIA_HOSPITALS);
+  const [selectedDepartment, setSelectedDepartment] = useState<BoliviaDepartment | "Todos">("Todos");
+  const [selectedHospitalType, setSelectedHospitalType] = useState<HospitalType | "Todos">("Todos");
+  const [selectedCenterId, setSelectedCenterId] = useState<string | null>(null);
+  const [keywordSearch, setKeywordSearch] = useState("");
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Fal.ai state
@@ -90,8 +66,9 @@ export default function HomePage() {
     const handleAgentSearch = (e: Event) => {
       const customEvent = e as CustomEvent;
       const city = customEvent.detail.city;
-      setCitySearch(city);
-      handleSearchCenters(city, "");
+      if (city) {
+        setKeywordSearch(city);
+      }
       setActiveTab("health-centers");
     };
 
@@ -117,28 +94,6 @@ export default function HomePage() {
     } else {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
-    }
-  };
-
-  const handleSearchCenters = async (cityVal = citySearch, specialtyVal = specialtySearch) => {
-    setIsSearching(true);
-    try {
-      const queryParams = new URLSearchParams({
-        city: cityVal,
-        ...(specialtyVal && { specialty: specialtyVal }),
-      });
-      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
-      if (!res.ok) throw new Error("Error en la búsqueda de centros");
-      const data = await res.json();
-      if (data.centers && data.centers.length > 0) {
-        setCenters(data.centers);
-      } else {
-        setCenters([]);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSearching(false);
     }
   };
 
@@ -476,51 +431,200 @@ export default function HomePage() {
           {activeTab === "health-centers" && (
             <div className="animate-fadeIn space-y-4">
               <Card className="border-sana-100 dark:border-slate-800 shadow-md bg-card">
-                <CardHeader className="pb-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <CardTitle className="text-base font-bold text-sana-800 dark:text-slate-200 flex items-center gap-2">
-                      <MapPin className="h-5 w-5 text-sana-600 dark:text-sana-400" />
-                      Buscador de Centros de Salud
-                    </CardTitle>
-                    <CardDescription className="text-xs">
-                      Consulta la disponibilidad en tiempo real con Exa y Firecrawl
-                    </CardDescription>
+                <CardHeader className="pb-3 border-b border-border">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <CardTitle className="text-base font-bold text-sana-800 dark:text-slate-200 flex items-center gap-2">
+                        <MapPin className="h-5 w-5 text-sana-600 dark:text-sana-400 animate-bounce" />
+                        Mapa GPS - Centros de Salud en Bolivia
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Localización en tiempo real de clínicas y hospitales en los 9 departamentos de Bolivia
+                      </CardDescription>
+                    </div>
+
+                    {/* Leyenda de Ocupación */}
+                    <div className="flex items-center gap-3 text-[10px] font-semibold bg-slate-50 dark:bg-slate-900 p-2 rounded-lg border border-border">
+                      <span className="text-muted-foreground">Ocupación:</span>
+                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span> &lt;50%
+                      </span>
+                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span> 50-75%
+                      </span>
+                      <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
+                        <span className="w-2 h-2 rounded-full bg-rose-500"></span> &gt;75%
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 max-w-md w-full">
-                    <Input
-                      placeholder="Ciudad (ej: La Paz)"
-                      value={citySearch}
-                      onChange={(e) => setCitySearch(e.target.value)}
-                      className="text-xs border-sana-200 dark:border-slate-800 h-9 flex-1 bg-card dark:text-slate-200"
-                    />
-                    <Input
-                      placeholder="Especialidad (ej: UCI)"
-                      value={specialtySearch}
-                      onChange={(e) => setSpecialtySearch(e.target.value)}
-                      className="text-xs border-sana-200 dark:border-slate-800 h-9 flex-1 bg-card dark:text-slate-200"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => handleSearchCenters()}
-                      disabled={isSearching}
-                      className="bg-sana-600 hover:bg-sana-700 dark:bg-sana-700 dark:hover:bg-sana-600 text-white font-semibold h-9"
-                    >
-                      {isSearching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-                      Buscar
-                    </Button>
+
+                  {/* Fila de Filtros */}
+                  <div className="mt-4 space-y-3">
+                    {/* Selector de Departamentos */}
+                    <div>
+                      <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                        Selecciona un Departamento (9 Departamentos):
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          "Todos",
+                          "La Paz",
+                          "Santa Cruz",
+                          "Cochabamba",
+                          "Oruro",
+                          "Potosí",
+                          "Tarija",
+                          "Chuquisaca",
+                          "Beni",
+                          "Pando",
+                        ].map((dept) => (
+                          <button
+                            key={dept}
+                            onClick={() => {
+                              setSelectedDepartment(dept as BoliviaDepartment | "Todos");
+                              setSelectedCenterId(null);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                              selectedDepartment === dept
+                                ? "bg-sana-600 text-white shadow-sm ring-2 ring-sana-500/30 dark:bg-sana-700"
+                                : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                            }`}
+                          >
+                            <MapPin className="h-3 w-3" />
+                            {dept}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Filtros secundarios: Tipo y Búsqueda */}
+                    <div className="flex flex-wrap items-center gap-3 pt-1">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
+                        <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Tipo:</span>
+                        <div className="flex gap-1 flex-wrap">
+                          {(["Todos", "Público", "Privado", "Seguro Social (CNS)"] as const).map((type) => (
+                            <button
+                              key={type}
+                              onClick={() => setSelectedHospitalType(type)}
+                              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                                selectedHospitalType === type
+                                  ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800/60 dark:text-slate-400"
+                              }`}
+                            >
+                              {type}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex-1 min-w-[220px]">
+                        <Input
+                          placeholder="Buscar por hospital, especialidad (ej: UCI)..."
+                          value={keywordSearch}
+                          onChange={(e) => setKeywordSearch(e.target.value)}
+                          className="text-xs border-sana-200 dark:border-slate-800 h-8 bg-card dark:text-slate-200"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </CardHeader>
-                <CardContent className="pt-2">
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {centers.length === 0 ? (
-                      <div className="col-span-2 py-8 text-center text-xs text-muted-foreground">
-                        No se encontraron clínicas ni hospitales para mostrar.
-                      </div>
-                    ) : (
-                      centers.map((center) => (
-                        <HealthCenterCard key={center.id} center={center} />
-                      ))
-                    )}
+
+                <CardContent className="p-4 space-y-6">
+                  {/* Mapa GPS Interactivo */}
+                  <MapWrapper
+                    centers={centers.filter((center) => {
+                      const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
+                      const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
+                      const q = keywordSearch.trim().toLowerCase();
+                      const matchQuery =
+                        !q ||
+                        center.name.toLowerCase().includes(q) ||
+                        center.city.toLowerCase().includes(q) ||
+                        center.address.toLowerCase().includes(q) ||
+                        center.services.some((s) => s.toLowerCase().includes(q));
+
+                      return matchDept && matchType && matchQuery;
+                    })}
+                    selectedCenterId={selectedCenterId}
+                    onSelectCenter={(center) => setSelectedCenterId(center.id)}
+                    departmentConfig={
+                      BOLIVIA_DEPARTMENTS_CONFIG[selectedDepartment] || BOLIVIA_DEPARTMENTS_CONFIG["Todos"]
+                    }
+                  />
+
+                  {/* Listado de centros en la zona */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider">
+                        Centros Médicos Encontrados ({
+                          centers.filter((center) => {
+                            const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
+                            const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
+                            const q = keywordSearch.trim().toLowerCase();
+                            const matchQuery =
+                              !q ||
+                              center.name.toLowerCase().includes(q) ||
+                              center.city.toLowerCase().includes(q) ||
+                              center.address.toLowerCase().includes(q) ||
+                              center.services.some((s) => s.toLowerCase().includes(q));
+
+                            return matchDept && matchType && matchQuery;
+                          }).length
+                        })
+                      </h4>
+                      {selectedDepartment !== "Todos" && (
+                        <span className="text-xs text-sana-600 dark:text-sana-400 font-semibold">
+                          Viendo {selectedDepartment} ({BOLIVIA_DEPARTMENTS_CONFIG[selectedDepartment].capital})
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {centers.filter((center) => {
+                        const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
+                        const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
+                        const q = keywordSearch.trim().toLowerCase();
+                        const matchQuery =
+                          !q ||
+                          center.name.toLowerCase().includes(q) ||
+                          center.city.toLowerCase().includes(q) ||
+                          center.address.toLowerCase().includes(q) ||
+                          center.services.some((s) => s.toLowerCase().includes(q));
+
+                        return matchDept && matchType && matchQuery;
+                      }).length === 0 ? (
+                        <div className="col-span-2 py-10 text-center text-xs text-muted-foreground bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-dashed border-border">
+                          No se encontraron centros médicos que coincidan con la búsqueda en {selectedDepartment}.
+                        </div>
+                      ) : (
+                        centers.filter((center) => {
+                          const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
+                          const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
+                          const q = keywordSearch.trim().toLowerCase();
+                          const matchQuery =
+                            !q ||
+                            center.name.toLowerCase().includes(q) ||
+                            center.city.toLowerCase().includes(q) ||
+                            center.address.toLowerCase().includes(q) ||
+                            center.services.some((s) => s.toLowerCase().includes(q));
+
+                          return matchDept && matchType && matchQuery;
+                        }).map((center) => (
+                          <div
+                            key={center.id}
+                            className={`transition-all rounded-xl cursor-pointer ${
+                              selectedCenterId === center.id
+                                ? "ring-2 ring-sana-600 dark:ring-sana-500 scale-[1.01]"
+                                : ""
+                            }`}
+                            onClick={() => setSelectedCenterId(center.id)}
+                          >
+                            <HealthCenterCard center={center} />
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>

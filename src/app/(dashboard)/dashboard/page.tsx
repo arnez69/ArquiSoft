@@ -11,6 +11,8 @@ const DEMO_CENTER: HealthCenter = {
   name: "Hospital Central",
   address: "Zona Sur",
   city: "La Paz",
+  department: "La Paz",
+  type: "Público",
   latitude: -16.5,
   longitude: -68.15,
   occupancyPercent: 55,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -18,33 +18,66 @@ import {
   Layers,
   ArrowRight,
   Sun,
-  Moon
+  Moon,
+  Download,
+  AlertCircle,
 } from "lucide-react";
 import { AgentChatPlaceholder } from "@/components/agent/agent-chat-placeholder";
 import { HealthCenterCard } from "@/components/health/health-center-card";
-import { MapWrapper } from "@/components/health/map-wrapper";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { WalletCard } from "@/components/wallet/wallet-card";
 import { Input } from "@/components/ui/input";
-import type { HealthCenter, BoliviaDepartment, HospitalType } from "@/types/health";
-import { BOLIVIA_HOSPITALS, BOLIVIA_DEPARTMENTS_CONFIG } from "@/data/bolivia-hospitals";
+import type { HealthCenter } from "@/types/health";
+import type { InfographicStyle } from "@/lib/infographic-generator";
+import type { VisualSummaryResult } from "@/types/summary";
+import { SanaAuthContainer } from "@/components/auth/sana-auth-container";
+import { LogOut } from "lucide-react";
+
+const INITIAL_DEMO_CENTERS: HealthCenter[] = [
+  {
+    id: "hc_1",
+    name: "Hospital del Norte",
+    address: "Av. Costanera 120",
+    city: "La Paz",
+    latitude: -16.4897,
+    longitude: -68.1193,
+    occupancyPercent: 42,
+    services: ["urgencias", "UCI", "pediatría"],
+    sourceUrl: "https://www.hospitaldelnorte.com.bo",
+    lastUpdated: new Date().toISOString(),
+  },
+  {
+    id: "hc_2",
+    name: "Clínica San Gabriel",
+    address: "Calle 6 de Agosto 450",
+    city: "La Paz",
+    latitude: -16.5001,
+    longitude: -68.1342,
+    occupancyPercent: 78,
+    services: ["consulta general", "laboratorio"],
+    sourceUrl: "https://www.clinicasangrabriel.com.bo",
+    lastUpdated: new Date().toISOString(),
+  },
+];
 
 type ActiveTab = "home" | "triage" | "wallet" | "health-centers" | "visual-summary";
 
 export default function HomePage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("home");
-  const [centers, setCenters] = useState<HealthCenter[]>(BOLIVIA_HOSPITALS);
-  const [selectedDepartment, setSelectedDepartment] = useState<BoliviaDepartment | "Todos">("Todos");
-  const [selectedHospitalType, setSelectedHospitalType] = useState<HospitalType | "Todos">("Todos");
-  const [selectedCenterId, setSelectedCenterId] = useState<string | null>(null);
-  const [keywordSearch, setKeywordSearch] = useState("");
+  const [centers, setCenters] = useState<HealthCenter[]>(INITIAL_DEMO_CENTERS);
+  const [citySearch, setCitySearch] = useState("La Paz");
+  const [specialtySearch, setSpecialtySearch] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Fal.ai state
   const [summaryPrompt, setSummaryPrompt] = useState("");
-  const [visualSummary, setVisualSummary] = useState<string | null>(null);
+  const [summaryStyle, setSummaryStyle] = useState<InfographicStyle>("infographic");
+  const [visualSummary, setVisualSummary] = useState<VisualSummaryResult | null>(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Theme Sync on Mount
   useEffect(() => {
@@ -62,21 +95,35 @@ export default function HomePage() {
   }, []);
 
   // Listeners for cross-tab triggers
+  const handleSearchCenters = useCallback(async (cityVal = citySearch, specialtyVal = specialtySearch) => {
+    setIsSearching(true);
+    try {
+      const queryParams = new URLSearchParams({
+        city: cityVal,
+        ...(specialtyVal && { specialty: specialtyVal }),
+      });
+      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
+      if (!res.ok) throw new Error("Error en la búsqueda de centros");
+      const data = await res.json();
+      if (data.centers && data.centers.length > 0) {
+        setCenters(data.centers);
+      } else {
+        setCenters([]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [citySearch, specialtySearch]);
+
+  // Listeners for cross-tab triggers
   useEffect(() => {
     const handleAgentSearch = (e: Event) => {
       const customEvent = e as CustomEvent;
-      const { city, department, type } = customEvent.detail || {};
-
-      if (department) {
-        setSelectedDepartment(department as BoliviaDepartment);
-      }
-      if (type) {
-        setSelectedHospitalType(type as HospitalType);
-      }
-      if (city) {
-        setKeywordSearch(city);
-      }
-      setSelectedCenterId(null);
+      const city = customEvent.detail.city;
+      setCitySearch(city);
+      handleSearchCenters(city, "");
       setActiveTab("health-centers");
     };
 
@@ -92,25 +139,29 @@ export default function HomePage() {
 
       setIsGeneratingSummary(true);
       setVisualSummary(null);
+      setSummaryError(null);
       fetch("/api/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptText,
           userId: "demo-user",
-          style: "infographic",
+          style: summaryStyle,
         }),
       })
-        .then(res => {
-          if (!res.ok) throw new Error("Error");
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error ?? "Error al generar infografía");
+          }
           return res.json();
         })
-        .then(data => {
-          setVisualSummary(data.imageUrl || "/placeholder-summary.png");
+        .then((data: VisualSummaryResult) => {
+          setVisualSummary(data);
         })
-        .catch(err => {
+        .catch((err: Error) => {
           console.error(err);
-          setVisualSummary("/placeholder-summary.png");
+          setSummaryError(err.message);
         })
         .finally(() => {
           setIsGeneratingSummary(false);
@@ -126,7 +177,7 @@ export default function HomePage() {
       window.removeEventListener("trigger-wallet-payment", handleTriggerWallet);
       window.removeEventListener("generate-fal-infographic", handleGenerateFalInfo);
     };
-  }, []);
+  }, [handleSearchCenters]);
 
   const toggleDarkMode = () => {
     const nextDark = !isDarkMode;
@@ -146,6 +197,7 @@ export default function HomePage() {
 
     setIsGeneratingSummary(true);
     setVisualSummary(null);
+    setSummaryError(null);
     try {
       const res = await fetch("/api/summary", {
         method: "POST",
@@ -153,20 +205,42 @@ export default function HomePage() {
         body: JSON.stringify({
           prompt: summaryPrompt,
           userId: "demo-user",
-          style: "infographic",
+          style: summaryStyle,
         }),
       });
 
-      if (!res.ok) throw new Error("Error al generar resumen visual");
-      const data = await res.json();
-      setVisualSummary(data.imageUrl || "/placeholder-summary.png");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Error al generar resumen visual");
+      }
+
+      const data = (await res.json()) as VisualSummaryResult;
+      setVisualSummary(data);
     } catch (err) {
       console.error(err);
-      setVisualSummary("/placeholder-summary.png");
+      setSummaryError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setIsGeneratingSummary(false);
     }
   };
+
+  const handleDownloadInfographic = () => {
+    if (!visualSummary?.imageUrl) return;
+    const link = document.createElement("a");
+    link.href = visualSummary.imageUrl;
+    link.download = `sanaia-infografia-${Date.now()}.svg`;
+    if (visualSummary.imageUrl.startsWith("http")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    link.click();
+  };
+
+  const STYLE_OPTIONS: { value: InfographicStyle; label: string }[] = [
+    { value: "infographic", label: "Infografía" },
+    { value: "diagram", label: "Diagrama" },
+    { value: "chart", label: "Gráfico" },
+  ];
 
   const menuItems = [
     {
@@ -174,30 +248,36 @@ export default function HomePage() {
       icon: HeartPulse,
       title: "Triage inteligente",
       description: "Agente Zavu evalúa síntomas y prioriza atención médica.",
-      dev: "Dev 3",
     },
     {
       id: "wallet" as ActiveTab,
       icon: Shield,
       title: "Billetera de emergencias",
       description: "Fondos listos para pagos médicos urgentes vía Wallbit.",
-      dev: "Dev 2",
     },
     {
       id: "health-centers" as ActiveTab,
       icon: MapPin,
       title: "Centros de salud",
       description: "Disponibilidad de clínicas con Firecrawl y Exa.",
-      dev: "Dev 4",
     },
     {
       id: "visual-summary" as ActiveTab,
       icon: Sparkles,
       title: "Resúmenes visuales",
       description: "Infografías médicas autogeneradas con fal.ai.",
-      dev: "Dev 4",
     },
   ];
+
+  if (!isAuthenticated) {
+    return (
+      <SanaAuthContainer
+        onAuthenticated={() => setIsAuthenticated(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-sana-50/30 to-background dark:from-slate-950 dark:to-slate-900 text-foreground flex flex-col transition-colors duration-300">
@@ -234,12 +314,15 @@ export default function HomePage() {
               )}
             </Button>
             <nav className="flex items-center gap-1.5 border-l pl-3 border-border">
-              <Link href="/login">
-                <Button variant="ghost" size="sm" className="text-xs text-sana-700 dark:text-slate-300">Iniciar sesión</Button>
-              </Link>
-              <Link href="/register">
-                <Button size="sm" className="bg-sana-600 hover:bg-sana-700 dark:bg-sana-700 dark:hover:bg-sana-600 text-white text-xs">Registrarse</Button>
-              </Link>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsAuthenticated(false)}
+                className="flex items-center gap-1.5 text-xs text-red-600 hover:bg-red-50 border-red-200"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Cerrar sesión
+              </Button>
             </nav>
           </div>
         </div>
@@ -284,13 +367,8 @@ export default function HomePage() {
                     : "bg-white/70 hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900/60 dark:hover:bg-slate-900 dark:border-slate-800/80"
                     }`}
                 >
-                  <div className="w-full flex items-center justify-between">
-                    <div className={`p-2 rounded-lg ${isActive ? "bg-sana-600 text-white dark:bg-sana-700" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-450"}`}>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <span className="rounded bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 text-[9px] font-bold text-slate-750 px-1.5 py-0.5">
-                      {item.dev}
-                    </span>
+                  <div className={`p-2 rounded-lg ${isActive ? "bg-sana-600 text-white dark:bg-sana-700" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-450"}`}>
+                    <Icon className="h-5 w-5" />
                   </div>
 
                   <div>
@@ -472,200 +550,51 @@ export default function HomePage() {
           {activeTab === "health-centers" && (
             <div className="animate-fadeIn space-y-4">
               <Card className="border-sana-100 dark:border-slate-800 shadow-md bg-card">
-                <CardHeader className="pb-3 border-b border-border">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                      <CardTitle className="text-base font-bold text-sana-800 dark:text-slate-200 flex items-center gap-2">
-                        <MapPin className="h-5 w-5 text-sana-600 dark:text-sana-400 animate-bounce" />
-                        Mapa GPS - Centros de Salud en Bolivia
-                      </CardTitle>
-                      <CardDescription className="text-xs">
-                        Localización en tiempo real de clínicas y hospitales en los 9 departamentos de Bolivia
-                      </CardDescription>
-                    </div>
-
-                    {/* Leyenda de Ocupación */}
-                    <div className="flex items-center gap-3 text-[10px] font-semibold bg-slate-50 dark:bg-slate-900 p-2 rounded-lg border border-border">
-                      <span className="text-muted-foreground">Ocupación:</span>
-                      <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span> &lt;50%
-                      </span>
-                      <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                        <span className="w-2 h-2 rounded-full bg-amber-500"></span> 50-75%
-                      </span>
-                      <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
-                        <span className="w-2 h-2 rounded-full bg-rose-500"></span> &gt;75%
-                      </span>
-                    </div>
+                <CardHeader className="pb-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <CardTitle className="text-base font-bold text-sana-800 dark:text-slate-200 flex items-center gap-2">
+                      <MapPin className="h-5 w-5 text-sana-600 dark:text-sana-400" />
+                      Buscador de Centros de Salud
+                    </CardTitle>
+                    <CardDescription className="text-xs">
+                      Consulta la disponibilidad en tiempo real con Exa y Firecrawl
+                    </CardDescription>
                   </div>
-
-                  {/* Fila de Filtros */}
-                  <div className="mt-4 space-y-3">
-                    {/* Selector de Departamentos */}
-                    <div>
-                      <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                        Selecciona un Departamento (9 Departamentos):
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          "Todos",
-                          "La Paz",
-                          "Santa Cruz",
-                          "Cochabamba",
-                          "Oruro",
-                          "Potosí",
-                          "Tarija",
-                          "Chuquisaca",
-                          "Beni",
-                          "Pando",
-                        ].map((dept) => (
-                          <button
-                            key={dept}
-                            onClick={() => {
-                              setSelectedDepartment(dept as BoliviaDepartment | "Todos");
-                              setSelectedCenterId(null);
-                            }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                              selectedDepartment === dept
-                                ? "bg-sana-600 text-white shadow-sm ring-2 ring-sana-500/30 dark:bg-sana-700"
-                                : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
-                            }`}
-                          >
-                            <MapPin className="h-3 w-3" />
-                            {dept}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Filtros secundarios: Tipo y Búsqueda */}
-                    <div className="flex flex-wrap items-center gap-3 pt-1">
-                      <div className="flex items-center gap-1.5 flex-1 min-w-[200px]">
-                        <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Tipo:</span>
-                        <div className="flex gap-1 flex-wrap">
-                          {(["Todos", "Público", "Privado", "Seguro Social (CNS)"] as const).map((type) => (
-                            <button
-                              key={type}
-                              onClick={() => setSelectedHospitalType(type)}
-                              className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
-                                selectedHospitalType === type
-                                  ? "bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900"
-                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800/60 dark:text-slate-400"
-                              }`}
-                            >
-                              {type}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="flex-1 min-w-[220px]">
-                        <Input
-                          placeholder="Buscar por hospital, especialidad (ej: UCI)..."
-                          value={keywordSearch}
-                          onChange={(e) => setKeywordSearch(e.target.value)}
-                          className="text-xs border-sana-200 dark:border-slate-800 h-8 bg-card dark:text-slate-200"
-                        />
-                      </div>
-                    </div>
+                  <div className="flex flex-wrap items-center gap-2 max-w-md w-full">
+                    <Input
+                      placeholder="Ciudad (ej: La Paz)"
+                      value={citySearch}
+                      onChange={(e) => setCitySearch(e.target.value)}
+                      className="text-xs border-sana-200 dark:border-slate-800 h-9 flex-1 bg-card dark:text-slate-200"
+                    />
+                    <Input
+                      placeholder="Especialidad (ej: UCI)"
+                      value={specialtySearch}
+                      onChange={(e) => setSpecialtySearch(e.target.value)}
+                      className="text-xs border-sana-200 dark:border-slate-800 h-9 flex-1 bg-card dark:text-slate-200"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => handleSearchCenters()}
+                      disabled={isSearching}
+                      className="bg-sana-600 hover:bg-sana-700 dark:bg-sana-700 dark:hover:bg-sana-600 text-white font-semibold h-9"
+                    >
+                      {isSearching ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+                      Buscar
+                    </Button>
                   </div>
                 </CardHeader>
-
-                <CardContent className="p-4 space-y-6">
-                  {/* Mapa GPS Interactivo */}
-                  <MapWrapper
-                    centers={centers.filter((center) => {
-                      const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
-                      const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
-                      const q = keywordSearch.trim().toLowerCase();
-                      const matchQuery =
-                        !q ||
-                        center.name.toLowerCase().includes(q) ||
-                        center.city.toLowerCase().includes(q) ||
-                        center.address.toLowerCase().includes(q) ||
-                        center.services.some((s) => s.toLowerCase().includes(q));
-
-                      return matchDept && matchType && matchQuery;
-                    })}
-                    selectedCenterId={selectedCenterId}
-                    onSelectCenter={(center) => setSelectedCenterId(center.id)}
-                    departmentConfig={
-                      BOLIVIA_DEPARTMENTS_CONFIG[selectedDepartment] || BOLIVIA_DEPARTMENTS_CONFIG["Todos"]
-                    }
-                  />
-
-                  {/* Listado de centros en la zona */}
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-xs font-bold text-gray-800 dark:text-slate-200 uppercase tracking-wider">
-                        Centros Médicos Encontrados ({
-                          centers.filter((center) => {
-                            const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
-                            const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
-                            const q = keywordSearch.trim().toLowerCase();
-                            const matchQuery =
-                              !q ||
-                              center.name.toLowerCase().includes(q) ||
-                              center.city.toLowerCase().includes(q) ||
-                              center.address.toLowerCase().includes(q) ||
-                              center.services.some((s) => s.toLowerCase().includes(q));
-
-                            return matchDept && matchType && matchQuery;
-                          }).length
-                        })
-                      </h4>
-                      {selectedDepartment !== "Todos" && (
-                        <span className="text-xs text-sana-600 dark:text-sana-400 font-semibold">
-                          Viendo {selectedDepartment} ({BOLIVIA_DEPARTMENTS_CONFIG[selectedDepartment].capital})
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {centers.filter((center) => {
-                        const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
-                        const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
-                        const q = keywordSearch.trim().toLowerCase();
-                        const matchQuery =
-                          !q ||
-                          center.name.toLowerCase().includes(q) ||
-                          center.city.toLowerCase().includes(q) ||
-                          center.address.toLowerCase().includes(q) ||
-                          center.services.some((s) => s.toLowerCase().includes(q));
-
-                        return matchDept && matchType && matchQuery;
-                      }).length === 0 ? (
-                        <div className="col-span-2 py-10 text-center text-xs text-muted-foreground bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-dashed border-border">
-                          No se encontraron centros médicos que coincidan con la búsqueda en {selectedDepartment}.
-                        </div>
-                      ) : (
-                        centers.filter((center) => {
-                          const matchDept = selectedDepartment === "Todos" || center.department === selectedDepartment;
-                          const matchType = selectedHospitalType === "Todos" || center.type === selectedHospitalType;
-                          const q = keywordSearch.trim().toLowerCase();
-                          const matchQuery =
-                            !q ||
-                            center.name.toLowerCase().includes(q) ||
-                            center.city.toLowerCase().includes(q) ||
-                            center.address.toLowerCase().includes(q) ||
-                            center.services.some((s) => s.toLowerCase().includes(q));
-
-                          return matchDept && matchType && matchQuery;
-                        }).map((center) => (
-                          <div
-                            key={center.id}
-                            className={`transition-all rounded-xl cursor-pointer ${
-                              selectedCenterId === center.id
-                                ? "ring-2 ring-sana-600 dark:ring-sana-500 scale-[1.01]"
-                                : ""
-                            }`}
-                            onClick={() => setSelectedCenterId(center.id)}
-                          >
-                            <HealthCenterCard center={center} />
-                          </div>
-                        ))
-                      )}
-                    </div>
+                <CardContent className="pt-2">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {centers.length === 0 ? (
+                      <div className="col-span-2 py-8 text-center text-xs text-muted-foreground">
+                        No se encontraron clínicas ni hospitales para mostrar.
+                      </div>
+                    ) : (
+                      centers.map((center) => (
+                        <HealthCenterCard key={center.id} center={center} />
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -681,11 +610,27 @@ export default function HomePage() {
                     Generador de Infografías
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Genera resúmenes visuales de triage médico usando fal.ai
+                    Genera resúmenes visuales de triage médico con fal.ai
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleGenerateSummary}>
                   <CardContent className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {STYLE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSummaryStyle(opt.value)}
+                          className={`rounded-full px-3 py-1 text-[11px] font-semibold border transition-colors ${
+                            summaryStyle === opt.value
+                              ? "bg-sana-600 text-white border-sana-600"
+                              : "bg-white dark:bg-slate-900 text-muted-foreground border-sana-200 dark:border-slate-700 hover:border-sana-400"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                     <textarea
                       placeholder="Ej: Paciente masculino de 45 años ingresa con presión arterial alta (140/90) y cefalea intensa. Triage clasificado como Código Amarillo: se recomienda evaluación médica y reposo."
                       value={summaryPrompt}
@@ -693,6 +638,12 @@ export default function HomePage() {
                       className="w-full h-40 text-xs border border-sana-200 dark:border-slate-850 rounded-lg p-3 focus:ring-1 focus:ring-sana-500 focus:outline-none bg-card dark:text-slate-200 resize-none"
                       required
                     />
+                    {summaryError && (
+                      <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 p-3 text-xs text-red-700 dark:text-red-400">
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                        {summaryError}
+                      </div>
+                    )}
                   </CardContent>
                   <CardFooter className="flex justify-end p-4 border-t bg-sana-50/10 border-border">
                     <Button
@@ -712,31 +663,58 @@ export default function HomePage() {
               </Card>
 
               <Card className="border-sana-100 dark:border-slate-800 shadow-md flex flex-col justify-between overflow-hidden min-h-[300px] bg-card">
-                <CardHeader className="bg-sana-50/50 dark:bg-slate-900/50 pb-3 border-b border-border">
+                <CardHeader className="bg-sana-50/50 dark:bg-slate-900/50 pb-3 border-b border-border flex flex-row items-center justify-between">
                   <CardTitle className="text-sm font-bold text-sana-800 dark:text-slate-200">Infografía Resultante</CardTitle>
+                  {visualSummary && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadInfographic}
+                      className="text-xs h-7 gap-1"
+                    >
+                      <Download className="h-3 w-3" />
+                      Descargar
+                    </Button>
+                  )}
                 </CardHeader>
-                <CardContent className="flex-1 flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
+                <CardContent className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
                   {isGeneratingSummary ? (
                     <div className="flex flex-col items-center gap-2">
                       <RefreshCw className="h-8 w-8 text-sana-600 dark:text-sana-500 animate-spin" />
                       <p className="text-[11px] text-muted-foreground animate-pulse font-semibold">
-                        Diseñando infografía médica en fal.ai...
+                        Generando infografía médica...
                       </p>
                     </div>
                   ) : visualSummary ? (
-                    <div className="relative w-full h-full max-h-[300px] flex items-center justify-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={visualSummary}
-                        alt="Infografía Médica SanaIA"
-                        className="rounded-lg max-h-[260px] object-contain shadow-md"
-                      />
+                    <div className="w-full space-y-3">
+                      <div className="relative w-full flex items-center justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={visualSummary.imageUrl}
+                          alt="Infografía Médica SanaIA"
+                          className="rounded-lg w-full max-h-[280px] object-contain shadow-md border border-sana-100 dark:border-slate-800"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
+                        <span>
+                          Fuente:{" "}
+                          <span className="font-semibold text-sana-600 dark:text-sana-400">
+                            {visualSummary.source === "fal.ai" ? "fal.ai" : "Generador SanaIA"}
+                          </span>
+                        </span>
+                        <span>
+                          {new Date(visualSummary.generatedAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
                     </div>
                   ) : (
                     <div className="text-center space-y-2">
                       <ImageIcon className="h-10 w-10 text-muted-foreground/60 mx-auto" />
-                      <p className="text-xs text-muted-foreground">
-                        Escribe el triage clínico en el panel izquierdo y haz clic en "Generar Infografía" para visualizar.
+                      <p className="text-xs text-muted-foreground max-w-[240px]">
+                        Escribe el triage clínico en el panel izquierdo y haz clic en &quot;Generar Infografía&quot; para visualizar.
                       </p>
                     </div>
                   )}

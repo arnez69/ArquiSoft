@@ -23,12 +23,27 @@ interface SuggestedAction {
   payload: Record<string, any>;
 }
 
+const WELCOME_MESSAGE =
+  "¡Hola! 👋 Soy **SanaIA**, tu asistente de salud disponible las 24 horas.\n\n" +
+  "Puedo ayudarte a:\n" +
+  "• Evaluar síntomas y orientarte\n" +
+  "• Darte consejos médicos generales\n" +
+  "• Encontrar centros de salud cercanos\n\n" +
+  "¿Cómo te sientes hoy? Cuéntame con confianza.";
+
+const INITIAL_ACTIONS: SuggestedAction[] = [
+  { type: "start_symptoms", label: "No me siento bien", payload: {} },
+  { type: "start_symptoms", label: "Tengo dolor o malestar", payload: {} },
+  { type: "find_hospital", label: "Buscar centro médico", payload: { city: "La Paz" } },
+  { type: "general_info", label: "Consejos de salud", payload: {} },
+];
+
 export function AgentChatPlaceholder() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "msg_init",
       role: "assistant",
-      content: "Hola, soy tu asistente médico de emergencias SanaIA. ¿En qué puedo ayudarte hoy? Cuéntame tus síntomas o si necesitas asistencia.",
+      content: WELCOME_MESSAGE,
       timestamp: new Date().toISOString(),
     },
   ]);
@@ -36,7 +51,8 @@ export function AgentChatPlaceholder() {
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
-  const [suggestedActions, setSuggestedActions] = useState<SuggestedAction[]>([]);
+  const [suggestedActions, setSuggestedActions] = useState<SuggestedAction[]>(INITIAL_ACTIONS);
+  const sessionIdRef = useRef(`session_${Date.now()}`);
 
   // Triage state collected from agent metadata
   const [triageData, setTriageData] = useState<{
@@ -113,7 +129,7 @@ export function AgentChatPlaceholder() {
         body: JSON.stringify({
           message: textToSend,
           userId: "demo-user",
-          sessionId: "demo-session",
+          sessionId: sessionIdRef.current,
         }),
       });
 
@@ -197,15 +213,65 @@ export function AgentChatPlaceholder() {
   const handleSuggestedAction = (action: SuggestedAction) => {
     if (action.type === "find_hospital") {
       const event = new CustomEvent("search-health-centers", {
-        detail: { city: action.payload.city || "La Paz" }
+        detail: { city: action.payload.city || "La Paz" },
       });
       window.dispatchEvent(event);
-    } else if (action.type === "restart_triage") {
-      setTriageData(null);
-    } else if (action.type === "generate_infographic") {
-      triggerFalGeneration(action.payload.prompt);
+      handleSendMessage("Necesito encontrar un centro médico cercano");
       return;
     }
+
+    if (action.type === "restart_triage") {
+      setTriageData(null);
+      sessionIdRef.current = `session_${Date.now()}`;
+      handleSendMessage("Iniciar nueva consulta");
+      return;
+    }
+
+    if (action.type === "generate_infographic") {
+      triggerFalGeneration(action.payload.prompt as string);
+      return;
+    }
+
+    if (action.type === "start_symptoms") {
+      handleSendMessage("Quiero contarte mis síntomas");
+      return;
+    }
+
+    if (action.type === "general_info") {
+      handleSendMessage("Quiero consejos de salud general");
+      return;
+    }
+
+    if (action.type === "continue_triage") {
+      handleSendMessage("Quiero continuar con la evaluación detallada");
+      return;
+    }
+
+    if (action.type === "input_pain" && action.payload.value) {
+      handleSendMessage(String(action.payload.value));
+      return;
+    }
+
+    if (action.type === "input_type" && action.payload.value) {
+      handleSendMessage(String(action.payload.value));
+      return;
+    }
+
+    if (action.type === "input_foods" && action.payload.value) {
+      handleSendMessage(String(action.payload.value));
+      return;
+    }
+
+    if (action.type === "input_example" && action.payload.value) {
+      handleSendMessage(String(action.payload.value));
+      return;
+    }
+
+    if (action.type === "check_wallet") {
+      handleSendMessage("Quiero revisar mi billetera de emergencias");
+      return;
+    }
+
     handleSendMessage(action.label);
   };
 
@@ -239,7 +305,7 @@ export function AgentChatPlaceholder() {
             </span>
           </div>
           <CardDescription className="text-sana-100 text-xs">
-            Triage inteligente guiado paso a paso para análisis preliminar.
+            Conversación natural, consejos médicos y orientación a centros de salud.
           </CardDescription>
         </CardHeader>
 
@@ -333,7 +399,7 @@ export function AgentChatPlaceholder() {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isRecording ? "Escuchando..." : "Describe tus síntomas aquí..."}
+              placeholder={isRecording ? "Escuchando..." : "Escribe aquí... saluda, describe síntomas o pide ayuda"}
               className="flex-1 text-xs border-sana-200 dark:border-slate-800 focus-visible:ring-sana-500 bg-card text-foreground"
               disabled={isRecording}
             />

@@ -27,6 +27,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { WalletCard } from "@/components/wallet/wallet-card";
 import { Input } from "@/components/ui/input";
 import type { HealthCenter } from "@/types/health";
+import { SanaAuthContainer } from "@/components/auth/sana-auth-container";
+import { LogOut } from "lucide-react";
 
 const INITIAL_DEMO_CENTERS: HealthCenter[] = [
   {
@@ -58,6 +60,7 @@ const INITIAL_DEMO_CENTERS: HealthCenter[] = [
 type ActiveTab = "home" | "triage" | "wallet" | "health-centers" | "visual-summary";
 
 export default function HomePage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("home");
   const [centers, setCenters] = useState<HealthCenter[]>(INITIAL_DEMO_CENTERS);
   const [citySearch, setCitySearch] = useState("La Paz");
@@ -202,6 +205,16 @@ export default function HomePage() {
     },
   ];
 
+  if (!isAuthenticated) {
+    return (
+      <SanaAuthContainer
+        onAuthenticated={() => setIsAuthenticated(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-sana-50/30 to-background dark:from-slate-950 dark:to-slate-900 text-foreground flex flex-col transition-colors duration-300">
       {/* Header */}
@@ -237,12 +250,15 @@ export default function HomePage() {
               )}
             </Button>
             <nav className="flex items-center gap-1.5 border-l pl-3 border-border">
-              <Link href="/login">
-                <Button variant="ghost" size="sm" className="text-xs text-sana-700 dark:text-slate-300">Iniciar sesión</Button>
-              </Link>
-              <Link href="/register">
-                <Button size="sm" className="bg-sana-600 hover:bg-sana-700 dark:bg-sana-700 dark:hover:bg-sana-600 text-white text-xs">Registrarse</Button>
-              </Link>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsAuthenticated(false)}
+                className="flex items-center gap-1.5 text-xs text-red-600 hover:bg-red-50 border-red-200"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Cerrar sesión
+              </Button>
             </nav>
           </div>
         </div>

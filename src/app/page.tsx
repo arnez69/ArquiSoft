@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -27,6 +27,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { WalletCard } from "@/components/wallet/wallet-card";
 import { Input } from "@/components/ui/input";
 import type { HealthCenter } from "@/types/health";
+import { SanaAuthContainer } from "@/components/auth/sana-auth-container";
+import { LogOut } from "lucide-react";
 
 const INITIAL_DEMO_CENTERS: HealthCenter[] = [
   {
@@ -58,6 +60,7 @@ const INITIAL_DEMO_CENTERS: HealthCenter[] = [
 type ActiveTab = "home" | "triage" | "wallet" | "health-centers" | "visual-summary";
 
 export default function HomePage() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>("home");
   const [centers, setCenters] = useState<HealthCenter[]>(INITIAL_DEMO_CENTERS);
   const [citySearch, setCitySearch] = useState("La Paz");
@@ -86,6 +89,29 @@ export default function HomePage() {
   }, []);
 
   // Listeners for cross-tab triggers
+  const handleSearchCenters = useCallback(async (cityVal = citySearch, specialtyVal = specialtySearch) => {
+    setIsSearching(true);
+    try {
+      const queryParams = new URLSearchParams({
+        city: cityVal,
+        ...(specialtyVal && { specialty: specialtyVal }),
+      });
+      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
+      if (!res.ok) throw new Error("Error en la búsqueda de centros");
+      const data = await res.json();
+      if (data.centers && data.centers.length > 0) {
+        setCenters(data.centers);
+      } else {
+        setCenters([]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [citySearch, specialtySearch]);
+
+  // Listeners for cross-tab triggers
   useEffect(() => {
     const handleAgentSearch = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -106,7 +132,7 @@ export default function HomePage() {
       window.removeEventListener("search-health-centers", handleAgentSearch);
       window.removeEventListener("trigger-wallet-payment", handleTriggerWallet);
     };
-  }, []);
+  }, [handleSearchCenters]);
 
   const toggleDarkMode = () => {
     const nextDark = !isDarkMode;
@@ -117,28 +143,6 @@ export default function HomePage() {
     } else {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
-    }
-  };
-
-  const handleSearchCenters = async (cityVal = citySearch, specialtyVal = specialtySearch) => {
-    setIsSearching(true);
-    try {
-      const queryParams = new URLSearchParams({
-        city: cityVal,
-        ...(specialtyVal && { specialty: specialtyVal }),
-      });
-      const res = await fetch(`/api/health-centers?${queryParams.toString()}`);
-      if (!res.ok) throw new Error("Error en la búsqueda de centros");
-      const data = await res.json();
-      if (data.centers && data.centers.length > 0) {
-        setCenters(data.centers);
-      } else {
-        setCenters([]);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSearching(false);
     }
   };
 
@@ -201,6 +205,16 @@ export default function HomePage() {
     },
   ];
 
+  if (!isAuthenticated) {
+    return (
+      <SanaAuthContainer
+        onAuthenticated={() => setIsAuthenticated(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-sana-50/30 to-background dark:from-slate-950 dark:to-slate-900 text-foreground flex flex-col transition-colors duration-300">
       {/* Header */}
@@ -236,12 +250,15 @@ export default function HomePage() {
               )}
             </Button>
             <nav className="flex items-center gap-1.5 border-l pl-3 border-border">
-              <Link href="/login">
-                <Button variant="ghost" size="sm" className="text-xs text-sana-700 dark:text-slate-300">Iniciar sesión</Button>
-              </Link>
-              <Link href="/register">
-                <Button size="sm" className="bg-sana-600 hover:bg-sana-700 dark:bg-sana-700 dark:hover:bg-sana-600 text-white text-xs">Registrarse</Button>
-              </Link>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsAuthenticated(false)}
+                className="flex items-center gap-1.5 text-xs text-red-600 hover:bg-red-50 border-red-200"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Cerrar sesión
+              </Button>
             </nav>
           </div>
         </div>
@@ -591,7 +608,7 @@ export default function HomePage() {
                     <div className="text-center space-y-2">
                       <ImageIcon className="h-10 w-10 text-muted-foreground/60 mx-auto" />
                       <p className="text-xs text-muted-foreground">
-                        Escribe el triage clínico en el panel izquierdo y haz clic en "Generar Infografía" para visualizar.
+                        Escribe el triage clínico en el panel izquierdo y haz clic en &quot;Generar Infografía&quot; para visualizar.
                       </p>
                     </div>
                   )}

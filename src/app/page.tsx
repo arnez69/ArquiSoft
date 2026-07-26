@@ -99,12 +99,47 @@ export default function HomePage() {
       setActiveTab("wallet");
     };
 
+    const handleGenerateFalInfo = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const promptText = customEvent.detail.prompt;
+      setSummaryPrompt(promptText);
+      setActiveTab("visual-summary");
+
+      setIsGeneratingSummary(true);
+      setVisualSummary(null);
+      fetch("/api/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          userId: "demo-user",
+          style: "infographic",
+        }),
+      })
+        .then(res => {
+          if (!res.ok) throw new Error("Error");
+          return res.json();
+        })
+        .then(data => {
+          setVisualSummary(data.imageUrl || "/placeholder-summary.png");
+        })
+        .catch(err => {
+          console.error(err);
+          setVisualSummary("/placeholder-summary.png");
+        })
+        .finally(() => {
+          setIsGeneratingSummary(false);
+        });
+    };
+
     window.addEventListener("search-health-centers", handleAgentSearch);
     window.addEventListener("trigger-wallet-payment", handleTriggerWallet);
-    
+    window.addEventListener("generate-fal-infographic", handleGenerateFalInfo);
+
     return () => {
       window.removeEventListener("search-health-centers", handleAgentSearch);
       window.removeEventListener("trigger-wallet-payment", handleTriggerWallet);
+      window.removeEventListener("generate-fal-infographic", handleGenerateFalInfo);
     };
   }, []);
 
@@ -249,18 +284,17 @@ export default function HomePage() {
 
       {/* Main Workspace Layout */}
       <main className="flex-1 mx-auto max-w-7xl w-full px-4 py-6 sm:px-6 grid gap-6 lg:grid-cols-4 items-start">
-        
+
         {/* LEFT COLUMN: Navigation Sidebar */}
         <section className="space-y-3 lg:order-1 order-2">
-          
+
           {/* Home / presentation button */}
           <button
             onClick={() => setActiveTab("home")}
-            className={`text-left p-3.5 rounded-xl border transition-all duration-300 flex items-center gap-3 w-full shadow-sm group ${
-              activeTab === "home"
-                ? "bg-sana-600 text-white border-sana-700 ring-2 ring-sana-500/20 dark:bg-sana-700 dark:border-sana-800"
-                : "bg-white hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900 dark:hover:bg-slate-800/80 dark:border-slate-800"
-            }`}
+            className={`text-left p-3.5 rounded-xl border transition-all duration-300 flex items-center gap-3 w-full shadow-sm group ${activeTab === "home"
+              ? "bg-sana-600 text-white border-sana-700 ring-2 ring-sana-500/20 dark:bg-sana-700 dark:border-sana-800"
+              : "bg-white hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900 dark:hover:bg-slate-800/80 dark:border-slate-800"
+              }`}
           >
             <div className={`p-2 rounded-lg ${activeTab === "home" ? "bg-sana-700 text-white dark:bg-sana-800" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-400"}`}>
               <Home className="h-5 w-5" />
@@ -277,16 +311,15 @@ export default function HomePage() {
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
-              
+
               return (
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`text-left p-3.5 rounded-xl border transition-all duration-300 flex flex-col justify-between items-start gap-2 shadow-xs group ${
-                    isActive
-                      ? "bg-white dark:bg-slate-900 border-sana-600 dark:border-sana-500 ring-2 ring-sana-500/20"
-                      : "bg-white/70 hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900/60 dark:hover:bg-slate-900 dark:border-slate-800/80"
-                  }`}
+                  className={`text-left p-3.5 rounded-xl border transition-all duration-300 flex flex-col justify-between items-start gap-2 shadow-xs group ${isActive
+                    ? "bg-white dark:bg-slate-900 border-sana-600 dark:border-sana-500 ring-2 ring-sana-500/20"
+                    : "bg-white/70 hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900/60 dark:hover:bg-slate-900 dark:border-slate-800/80"
+                    }`}
                 >
                   <div className="w-full flex items-center justify-between">
                     <div className={`p-2 rounded-lg ${isActive ? "bg-sana-600 text-white dark:bg-sana-700" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-450"}`}>
@@ -337,7 +370,7 @@ export default function HomePage() {
 
         {/* RIGHT COLUMN: Active Workspace Area */}
         <section className="lg:col-span-3 space-y-6 lg:order-2 order-1">
-          
+
           {/* Welcome / Home view */}
           {activeTab === "home" && (
             <div className="animate-fadeIn space-y-6">
@@ -352,15 +385,15 @@ export default function HomePage() {
                       SanaIA es una PWA de salud inteligente e integrada que conecta asistencia médica conversacional, pagos rápidos de emergencia y disponibilidad hospitalaria en una sola interfaz limpia y lista para producción.
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
-                      <Button 
-                        onClick={() => setActiveTab("triage")} 
+                      <Button
+                        onClick={() => setActiveTab("triage")}
                         className="bg-white dark:bg-slate-100 text-sana-700 dark:text-slate-800 hover:bg-sana-50 dark:hover:bg-slate-200 font-bold text-xs flex gap-1.5 items-center"
                       >
                         Comenzar Consulta
                         <ArrowRight className="h-4 w-4" />
                       </Button>
-                      <Button 
-                        onClick={() => window.open("tel:118")} 
+                      <Button
+                        onClick={() => window.open("tel:118")}
                         variant="destructive"
                         className="font-bold text-xs flex gap-1.5 items-center"
                       >

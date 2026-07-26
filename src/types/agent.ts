@@ -35,7 +35,20 @@ export interface AgentResponse {
 }
 
 export interface AgentAction {
-  type: "book_appointment" | "check_wallet" | "find_hospital" | "call_emergency";
+  type:
+    | "book_appointment"
+    | "check_wallet"
+    | "find_hospital"
+    | "call_emergency"
+    | "start_symptoms"
+    | "general_info"
+    | "input_pain"
+    | "input_type"
+    | "input_foods"
+    | "input_example"
+    | "continue_triage"
+    | "restart_triage"
+    | "generate_infographic";
   payload: Record<string, unknown>;
   label: string;
 }

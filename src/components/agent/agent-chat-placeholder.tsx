@@ -20,6 +20,7 @@ interface SuggestedAction {
 }
 
 export function AgentChatPlaceholder() {
+  const [mounted, setMounted] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "msg_init",
@@ -35,6 +36,11 @@ export function AgentChatPlaceholder() {
   const [suggestedActions, setSuggestedActions] = useState<SuggestedAction[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Set mounted state
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -231,7 +237,7 @@ export function AgentChatPlaceholder() {
               )}
             </div>
             <span className="text-[10px] text-muted-foreground mt-1 px-1">
-              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {mounted ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""}
             </span>
           </div>
         ))}

@@ -18,7 +18,9 @@ import {
   Layers,
   ArrowRight,
   Sun,
-  Moon
+  Moon,
+  Download,
+  AlertCircle,
 } from "lucide-react";
 import { AgentChatPlaceholder } from "@/components/agent/agent-chat-placeholder";
 import { HealthCenterCard } from "@/components/health/health-center-card";
@@ -27,6 +29,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { WalletCard } from "@/components/wallet/wallet-card";
 import { Input } from "@/components/ui/input";
 import type { HealthCenter } from "@/types/health";
+import type { InfographicStyle } from "@/lib/infographic-generator";
+import type { VisualSummaryResult } from "@/types/summary";
 import { SanaAuthContainer } from "@/components/auth/sana-auth-container";
 import { LogOut } from "lucide-react";
 
@@ -70,8 +74,10 @@ export default function HomePage() {
 
   // Fal.ai state
   const [summaryPrompt, setSummaryPrompt] = useState("");
-  const [visualSummary, setVisualSummary] = useState<string | null>(null);
+  const [summaryStyle, setSummaryStyle] = useState<InfographicStyle>("infographic");
+  const [visualSummary, setVisualSummary] = useState<VisualSummaryResult | null>(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // Theme Sync on Mount
   useEffect(() => {
@@ -133,25 +139,29 @@ export default function HomePage() {
 
       setIsGeneratingSummary(true);
       setVisualSummary(null);
+      setSummaryError(null);
       fetch("/api/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: promptText,
           userId: "demo-user",
-          style: "infographic",
+          style: summaryStyle,
         }),
       })
-        .then(res => {
-          if (!res.ok) throw new Error("Error");
+        .then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error ?? "Error al generar infografía");
+          }
           return res.json();
         })
-        .then(data => {
-          setVisualSummary(data.imageUrl || "/placeholder-summary.png");
+        .then((data: VisualSummaryResult) => {
+          setVisualSummary(data);
         })
-        .catch(err => {
+        .catch((err: Error) => {
           console.error(err);
-          setVisualSummary("/placeholder-summary.png");
+          setSummaryError(err.message);
         })
         .finally(() => {
           setIsGeneratingSummary(false);
@@ -187,6 +197,7 @@ export default function HomePage() {
 
     setIsGeneratingSummary(true);
     setVisualSummary(null);
+    setSummaryError(null);
     try {
       const res = await fetch("/api/summary", {
         method: "POST",
@@ -194,20 +205,42 @@ export default function HomePage() {
         body: JSON.stringify({
           prompt: summaryPrompt,
           userId: "demo-user",
-          style: "infographic",
+          style: summaryStyle,
         }),
       });
 
-      if (!res.ok) throw new Error("Error al generar resumen visual");
-      const data = await res.json();
-      setVisualSummary(data.imageUrl || "/placeholder-summary.png");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Error al generar resumen visual");
+      }
+
+      const data = (await res.json()) as VisualSummaryResult;
+      setVisualSummary(data);
     } catch (err) {
       console.error(err);
-      setVisualSummary("/placeholder-summary.png");
+      setSummaryError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
       setIsGeneratingSummary(false);
     }
   };
+
+  const handleDownloadInfographic = () => {
+    if (!visualSummary?.imageUrl) return;
+    const link = document.createElement("a");
+    link.href = visualSummary.imageUrl;
+    link.download = `sanaia-infografia-${Date.now()}.svg`;
+    if (visualSummary.imageUrl.startsWith("http")) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    link.click();
+  };
+
+  const STYLE_OPTIONS: { value: InfographicStyle; label: string }[] = [
+    { value: "infographic", label: "Infografía" },
+    { value: "diagram", label: "Diagrama" },
+    { value: "chart", label: "Gráfico" },
+  ];
 
   const menuItems = [
     {
@@ -215,28 +248,24 @@ export default function HomePage() {
       icon: HeartPulse,
       title: "Triage inteligente",
       description: "Agente Zavu evalúa síntomas y prioriza atención médica.",
-      dev: "Dev 3",
     },
     {
       id: "wallet" as ActiveTab,
       icon: Shield,
       title: "Billetera de emergencias",
       description: "Fondos listos para pagos médicos urgentes vía Wallbit.",
-      dev: "Dev 2",
     },
     {
       id: "health-centers" as ActiveTab,
       icon: MapPin,
       title: "Centros de salud",
       description: "Disponibilidad de clínicas con Firecrawl y Exa.",
-      dev: "Dev 4",
     },
     {
       id: "visual-summary" as ActiveTab,
       icon: Sparkles,
       title: "Resúmenes visuales",
       description: "Infografías médicas autogeneradas con fal.ai.",
-      dev: "Dev 4",
     },
   ];
 
@@ -338,13 +367,8 @@ export default function HomePage() {
                     : "bg-white/70 hover:bg-white border-sana-100 hover:border-sana-300 dark:bg-slate-900/60 dark:hover:bg-slate-900 dark:border-slate-800/80"
                     }`}
                 >
-                  <div className="w-full flex items-center justify-between">
-                    <div className={`p-2 rounded-lg ${isActive ? "bg-sana-600 text-white dark:bg-sana-700" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-450"}`}>
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <span className="rounded bg-slate-100 dark:bg-slate-800 border dark:border-slate-700 text-[9px] font-bold text-slate-750 px-1.5 py-0.5">
-                      {item.dev}
-                    </span>
+                  <div className={`p-2 rounded-lg ${isActive ? "bg-sana-600 text-white dark:bg-sana-700" : "bg-sana-50 text-sana-600 group-hover:bg-sana-100 dark:bg-slate-800 dark:text-sana-450"}`}>
+                    <Icon className="h-5 w-5" />
                   </div>
 
                   <div>
@@ -586,11 +610,27 @@ export default function HomePage() {
                     Generador de Infografías
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Genera resúmenes visuales de triage médico usando fal.ai
+                    Genera resúmenes visuales de triage médico con fal.ai
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleGenerateSummary}>
                   <CardContent className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      {STYLE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSummaryStyle(opt.value)}
+                          className={`rounded-full px-3 py-1 text-[11px] font-semibold border transition-colors ${
+                            summaryStyle === opt.value
+                              ? "bg-sana-600 text-white border-sana-600"
+                              : "bg-white dark:bg-slate-900 text-muted-foreground border-sana-200 dark:border-slate-700 hover:border-sana-400"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                     <textarea
                       placeholder="Ej: Paciente masculino de 45 años ingresa con presión arterial alta (140/90) y cefalea intensa. Triage clasificado como Código Amarillo: se recomienda evaluación médica y reposo."
                       value={summaryPrompt}
@@ -598,6 +638,12 @@ export default function HomePage() {
                       className="w-full h-40 text-xs border border-sana-200 dark:border-slate-850 rounded-lg p-3 focus:ring-1 focus:ring-sana-500 focus:outline-none bg-card dark:text-slate-200 resize-none"
                       required
                     />
+                    {summaryError && (
+                      <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900 p-3 text-xs text-red-700 dark:text-red-400">
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                        {summaryError}
+                      </div>
+                    )}
                   </CardContent>
                   <CardFooter className="flex justify-end p-4 border-t bg-sana-50/10 border-border">
                     <Button
@@ -617,30 +663,57 @@ export default function HomePage() {
               </Card>
 
               <Card className="border-sana-100 dark:border-slate-800 shadow-md flex flex-col justify-between overflow-hidden min-h-[300px] bg-card">
-                <CardHeader className="bg-sana-50/50 dark:bg-slate-900/50 pb-3 border-b border-border">
+                <CardHeader className="bg-sana-50/50 dark:bg-slate-900/50 pb-3 border-b border-border flex flex-row items-center justify-between">
                   <CardTitle className="text-sm font-bold text-sana-800 dark:text-slate-200">Infografía Resultante</CardTitle>
+                  {visualSummary && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadInfographic}
+                      className="text-xs h-7 gap-1"
+                    >
+                      <Download className="h-3 w-3" />
+                      Descargar
+                    </Button>
+                  )}
                 </CardHeader>
-                <CardContent className="flex-1 flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
+                <CardContent className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
                   {isGeneratingSummary ? (
                     <div className="flex flex-col items-center gap-2">
                       <RefreshCw className="h-8 w-8 text-sana-600 dark:text-sana-500 animate-spin" />
                       <p className="text-[11px] text-muted-foreground animate-pulse font-semibold">
-                        Diseñando infografía médica en fal.ai...
+                        Generando infografía médica...
                       </p>
                     </div>
                   ) : visualSummary ? (
-                    <div className="relative w-full h-full max-h-[300px] flex items-center justify-center">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={visualSummary}
-                        alt="Infografía Médica SanaIA"
-                        className="rounded-lg max-h-[260px] object-contain shadow-md"
-                      />
+                    <div className="w-full space-y-3">
+                      <div className="relative w-full flex items-center justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={visualSummary.imageUrl}
+                          alt="Infografía Médica SanaIA"
+                          className="rounded-lg w-full max-h-[280px] object-contain shadow-md border border-sana-100 dark:border-slate-800"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground px-1">
+                        <span>
+                          Fuente:{" "}
+                          <span className="font-semibold text-sana-600 dark:text-sana-400">
+                            {visualSummary.source === "fal.ai" ? "fal.ai" : "Generador SanaIA"}
+                          </span>
+                        </span>
+                        <span>
+                          {new Date(visualSummary.generatedAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
                     </div>
                   ) : (
                     <div className="text-center space-y-2">
                       <ImageIcon className="h-10 w-10 text-muted-foreground/60 mx-auto" />
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-muted-foreground max-w-[240px]">
                         Escribe el triage clínico en el panel izquierdo y haz clic en &quot;Generar Infografía&quot; para visualizar.
                       </p>
                     </div>

@@ -48,6 +48,8 @@ export interface AgentAction {
     | "input_example"
     | "continue_triage"
     | "restart_triage"
+    | "select_department"
+    | "select_hospital_type"
     | "generate_infographic";
   payload: Record<string, unknown>;
   label: string;

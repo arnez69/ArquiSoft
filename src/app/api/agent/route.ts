@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getZavuClient } from "@/lib/zavu";
-import type { AgentRequest } from "@/types/agent";
+import type { AgentRequest, AgentMessage } from "@/types/agent";
 import { generateId } from "@/utils";
+import { saveServerAgentMessage, saveServerAgentSession } from "@/lib/supabase-agent";
 
 /**
  * POST /api/agent
- * Dev 3: Orquestación del agente Zavu
+ * Dev 3: Orquestación del agente Zavu + Persistencia en Supabase
  *
  * Body: { sessionId?, message, userId, context? }
  */
@@ -20,15 +21,38 @@ export async function POST(request: Request) {
       );
     }
 
+    const sessionId = body.sessionId ?? generateId("session");
+    const userId = body.userId;
+
+    const userMessage: AgentMessage = {
+      id: generateId("msg_user"),
+      sessionId,
+      role: "user",
+      content: body.message,
+      source: "text",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Guardar sesión y mensaje en servidor Supabase
+    await saveServerAgentSession({
+      id: sessionId,
+      userId,
+      title: body.message.slice(0, 30) + (body.message.length > 30 ? "..." : ""),
+    });
+    await saveServerAgentMessage(userMessage);
+
     const agentRequest: AgentRequest = {
-      sessionId: body.sessionId ?? generateId("session"),
+      sessionId,
       message: body.message,
-      userId: body.userId,
+      userId,
       context: body.context,
     };
 
     const client = getZavuClient();
     const response = await client.sendMessage(agentRequest);
+
+    // Guardar respuesta del asistente en servidor Supabase
+    await saveServerAgentMessage(response.message);
 
     return NextResponse.json(response);
   } catch (error) {

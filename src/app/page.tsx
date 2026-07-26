@@ -65,10 +65,18 @@ export default function HomePage() {
   useEffect(() => {
     const handleAgentSearch = (e: Event) => {
       const customEvent = e as CustomEvent;
-      const city = customEvent.detail.city;
+      const { city, department, type } = customEvent.detail || {};
+
+      if (department) {
+        setSelectedDepartment(department as BoliviaDepartment);
+      }
+      if (type) {
+        setSelectedHospitalType(type as HospitalType);
+      }
       if (city) {
         setKeywordSearch(city);
       }
+      setSelectedCenterId(null);
       setActiveTab("health-centers");
     };
 

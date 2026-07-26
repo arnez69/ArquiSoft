@@ -3,12 +3,21 @@
 import { useState, useRef, useEffect } from "react";
 import {
   MessageCircle, Mic, Send, Volume2, VolumeX, MicOff,
-  AlertCircle, Activity, HeartPulse, Flame, Utensils,
-  ShieldAlert, Sparkles, RefreshCw, Heart
+  Activity, HeartPulse, Flame, Utensils,
+  ShieldAlert, Sparkles, PlusCircle, History, ChevronLeft, Heart
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  getAgentSessions,
+  getAgentSessionMessages,
+  saveLocalSession,
+  saveLocalMessage,
+  saveActiveSessionId,
+  getActiveSessionId,
+} from "@/lib/supabase-agent";
+import type { AgentSession, AgentMessage } from "@/types/agent";
 
 interface Message {
   id: string;
@@ -26,19 +35,27 @@ interface SuggestedAction {
 const WELCOME_MESSAGE =
   "¡Hola! 👋 Soy **SanaIA**, tu asistente de salud disponible las 24 horas.\n\n" +
   "Puedo ayudarte a:\n" +
-  "• Evaluar síntomas y orientarte\n" +
-  "• Darte consejos médicos generales\n" +
-  "• Encontrar centros de salud cercanos\n\n" +
+  "• Evaluar síntomas y orientarte en un triage clínico\n" +
+  "• Recomendarte el departamento y tipo de hospital (Público o Privado) adecuado\n" +
+  "• Darte consejos médicos generales\n\n" +
   "¿Cómo te sientes hoy? Cuéntame con confianza.";
 
 const INITIAL_ACTIONS: SuggestedAction[] = [
   { type: "start_symptoms", label: "No me siento bien", payload: {} },
   { type: "start_symptoms", label: "Tengo dolor o malestar", payload: {} },
-  { type: "find_hospital", label: "Buscar centro médico", payload: { city: "La Paz" } },
+  { type: "find_hospital", label: "Buscar centro médico", payload: {} },
   { type: "general_info", label: "Consejos de salud", payload: {} },
 ];
 
 export function AgentChatPlaceholder() {
+  const [sessionId, setSessionId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const active = getActiveSessionId();
+      if (active) return active;
+    }
+    return `session_${Date.now()}`;
+  });
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "msg_init",
@@ -52,7 +69,10 @@ export function AgentChatPlaceholder() {
   const [isRecording, setIsRecording] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState<string | null>(null);
   const [suggestedActions, setSuggestedActions] = useState<SuggestedAction[]>(INITIAL_ACTIONS);
-  const sessionIdRef = useRef(`session_${Date.now()}`);
+
+  // Historial de sesiones estilo ChatGPT/Gemini
+  const [sessions, setSessions] = useState<AgentSession[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Triage state collected from agent metadata
   const [triageData, setTriageData] = useState<{
@@ -60,7 +80,7 @@ export function AgentChatPlaceholder() {
     painIndex?: number;
     painType?: string;
     foods?: string;
-    severity?: 'Emergencia' | 'Urgencia' | 'No urgente';
+    severity?: "Emergencia" | "Urgencia" | "No urgente";
     presumptiveDiagnosis?: string;
     step?: string;
   } | null>(null);
@@ -68,12 +88,52 @@ export function AgentChatPlaceholder() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
+  // Cargar sesión activa al montar el componente (al cambiar de pestañas en la app)
+  useEffect(() => {
+    async function initSessionAndList() {
+      const activeId = getActiveSessionId();
+      if (activeId) {
+        setSessionId(activeId);
+        const savedMsgs = await getAgentSessionMessages(activeId);
+        if (savedMsgs.length > 0) {
+          setMessages(
+            savedMsgs.map((m) => ({
+              id: m.id,
+              role: m.role as "user" | "assistant",
+              content: m.content,
+              timestamp: m.timestamp,
+            }))
+          );
+          // Restaurar metadata de triage si existe
+          const lastBotMsg = [...savedMsgs].reverse().find((m) => m.metadata?.triageData);
+          if (lastBotMsg?.metadata?.triageData) {
+            setTriageData(lastBotMsg.metadata.triageData as any);
+          }
+        }
+      }
+
+      const sessionsList = await getAgentSessions("demo-user");
+      setSessions(sessionsList);
+    }
+
+    initSessionAndList();
+  }, []);
+
+  // Recargar la lista de sesiones cuando cambia el estado de mensajes
+  useEffect(() => {
+    async function updateList() {
+      const sessionsList = await getAgentSessions("demo-user");
+      setSessions(sessionsList);
+    }
+    updateList();
+  }, [messages.length]);
+
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Speech Recognition setup (Whisper fallback if not available)
+  // Speech Recognition setup
   useEffect(() => {
     if (typeof window !== "undefined") {
       const SpeechRecognition =
@@ -84,38 +144,99 @@ export function AgentChatPlaceholder() {
         recognition.lang = "es-BO";
         recognition.interimResults = false;
 
-        recognition.onstart = () => {
-          setIsRecording(true);
-        };
-
+        recognition.onstart = () => setIsRecording(true);
         recognition.onresult = (event: any) => {
           const transcript = event.results[0][0].transcript;
           setInput(transcript);
         };
-
-        recognition.onerror = (event: any) => {
-          console.error("Speech recognition error:", event.error);
-          setIsRecording(false);
-        };
-
-        recognition.onend = () => {
-          setIsRecording(false);
-        };
+        recognition.onerror = () => setIsRecording(false);
+        recognition.onend = () => setIsRecording(false);
 
         recognitionRef.current = recognition;
       }
     }
   }, []);
 
+  const handleStartNewSession = () => {
+    const newId = `session_${Date.now()}`;
+    setSessionId(newId);
+    saveActiveSessionId(newId);
+    setTriageData(null);
+    const initMsg: Message = {
+      id: `msg_init_${Date.now()}`,
+      role: "assistant",
+      content: WELCOME_MESSAGE,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages([initMsg]);
+    setSuggestedActions(INITIAL_ACTIONS);
+
+    // Guardar en local la nueva sesión
+    saveLocalSession({
+      id: newId,
+      userId: "demo-user",
+      title: "Nueva consulta",
+    });
+  };
+
+  const handleSelectSession = async (sId: string) => {
+    setSessionId(sId);
+    saveActiveSessionId(sId);
+    setIsLoading(true);
+    try {
+      const msgs = await getAgentSessionMessages(sId);
+      if (msgs.length > 0) {
+        setMessages(
+          msgs.map((m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: m.timestamp,
+          }))
+        );
+
+        // Restaurar panel de triage si hay metadata guardada
+        const lastBotMsg = [...msgs].reverse().find((m) => m.metadata?.triageData);
+        if (lastBotMsg?.metadata?.triageData) {
+          setTriageData(lastBotMsg.metadata.triageData as any);
+        } else {
+          setTriageData(null);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSendMessage = async (textToSend: string) => {
     if (!textToSend.trim() || isLoading) return;
 
+    const userMsgId = `msg_user_${Date.now()}`;
     const userMessage: Message = {
-      id: `msg_user_${Date.now()}`,
+      id: userMsgId,
       role: "user",
       content: textToSend,
       timestamp: new Date().toISOString(),
     };
+
+    // Guardar inmediatamente en localStorage del cliente
+    const agentUserMsg: AgentMessage = {
+      id: userMsgId,
+      sessionId,
+      role: "user",
+      content: textToSend,
+      source: "text",
+      timestamp: userMessage.timestamp,
+    };
+    saveLocalSession({
+      id: sessionId,
+      userId: "demo-user",
+      title: textToSend.slice(0, 30) + (textToSend.length > 30 ? "..." : ""),
+    });
+    saveLocalMessage(agentUserMsg);
+    saveActiveSessionId(sessionId);
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
@@ -129,7 +250,7 @@ export function AgentChatPlaceholder() {
         body: JSON.stringify({
           message: textToSend,
           userId: "demo-user",
-          sessionId: sessionIdRef.current,
+          sessionId,
         }),
       });
 
@@ -143,9 +264,20 @@ export function AgentChatPlaceholder() {
         timestamp: data.message.timestamp,
       };
 
+      // Guardar mensaje del bot en localStorage del cliente
+      const agentBotMsg: AgentMessage = {
+        id: data.message.id,
+        sessionId,
+        role: "assistant",
+        content: data.message.content,
+        source: "text",
+        timestamp: data.message.timestamp,
+        metadata: data.message.metadata,
+      };
+      saveLocalMessage(agentBotMsg);
+
       setMessages((prev) => [...prev, botMessage]);
 
-      // Extract triage data from assistant message metadata
       if (data.message.metadata?.triageData) {
         setTriageData(data.message.metadata.triageData);
       }
@@ -171,7 +303,6 @@ export function AgentChatPlaceholder() {
 
   const toggleRecording = () => {
     if (!recognitionRef.current) {
-      // Mock recording behavior if browser doesn't support speech recognition API
       if (isRecording) {
         setIsRecording(false);
       } else {
@@ -212,18 +343,28 @@ export function AgentChatPlaceholder() {
 
   const handleSuggestedAction = (action: SuggestedAction) => {
     if (action.type === "find_hospital") {
+      handleSendMessage("Quiero buscar centros médicos en Bolivia");
+      return;
+    }
+
+    if (action.type === "select_department") {
+      const dept = action.payload.department;
+      handleSendMessage(`Estoy en el departamento de ${dept}`);
+      return;
+    }
+
+    if (action.type === "select_hospital_type") {
+      const { department, hospitalType } = action.payload;
       const event = new CustomEvent("search-health-centers", {
-        detail: { city: action.payload.city || "La Paz" },
+        detail: { department: department || "La Paz", type: hospitalType || "Público" },
       });
       window.dispatchEvent(event);
-      handleSendMessage("Necesito encontrar un centro médico cercano");
+      handleSendMessage(`Ver ${hospitalType}s en ${department}`);
       return;
     }
 
     if (action.type === "restart_triage") {
-      setTriageData(null);
-      sessionIdRef.current = `session_${Date.now()}`;
-      handleSendMessage("Iniciar nueva consulta");
+      handleStartNewSession();
       return;
     }
 
@@ -277,12 +418,11 @@ export function AgentChatPlaceholder() {
 
   const triggerFalGeneration = (promptText: string) => {
     const event = new CustomEvent("generate-fal-infographic", {
-      detail: { prompt: promptText }
+      detail: { prompt: promptText },
     });
     window.dispatchEvent(event);
   };
 
-  // Get color based on pain level
   const getPainColor = (index?: number) => {
     if (!index) return "bg-gray-200";
     if (index <= 3) return "bg-emerald-500";
@@ -292,22 +432,105 @@ export function AgentChatPlaceholder() {
 
   return (
     <div className="grid gap-6 md:grid-cols-3 items-stretch w-full">
-      {/* LEFT: The Chat Module */}
-      <Card className="flex h-[580px] flex-col shadow-lg border-sana-100 dark:border-slate-800 md:col-span-2 bg-card">
-        <CardHeader className="bg-gradient-to-r from-sana-600 to-sana-700 dark:from-sana-850 dark:to-sana-900 text-white rounded-t-lg pb-3">
+      {/* LEFT: The Chat Module with Gemini/ChatGPT sidebar */}
+      <Card className="flex h-[580px] flex-col shadow-lg border-sana-100 dark:border-slate-800 md:col-span-2 bg-card relative overflow-hidden">
+        <CardHeader className="bg-gradient-to-r from-sana-600 to-sana-700 dark:from-sana-850 dark:to-sana-900 text-white rounded-t-lg pb-3 z-10">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base font-bold">
-              <MessageCircle className="h-5 w-5" />
-              Asistente SanaIA
-            </CardTitle>
-            <span className="rounded-full bg-sana-500/50 px-2.5 py-0.5 text-[10px] font-semibold border border-sana-400/30">
-              Zavu Agente Clínico
-            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="text-white hover:bg-sana-500/30 h-8 w-8"
+                title="Historial de chats (Gemini / ChatGPT)"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+              <CardTitle className="flex items-center gap-2 text-base font-bold">
+                <MessageCircle className="h-5 w-5" />
+                Asistente SanaIA
+              </CardTitle>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={handleStartNewSession}
+                className="bg-white/20 hover:bg-white/30 text-white text-xs font-semibold h-7 px-2.5 flex items-center gap-1 border border-white/20"
+              >
+                <PlusCircle className="h-3.5 w-3.5" />
+                Nueva Consulta
+              </Button>
+              <span className="hidden sm:inline-block rounded-full bg-sana-500/50 px-2.5 py-0.5 text-[10px] font-semibold border border-sana-400/30">
+                Zavu Agente Clínico
+              </span>
+            </div>
           </div>
           <CardDescription className="text-sana-100 text-xs">
-            Conversación natural, consejos médicos y orientación a centros de salud.
+            Conversación médica, triage inteligente y recomendación directa de hospitales públicos o privados.
           </CardDescription>
         </CardHeader>
+
+        {/* Sidebar flotante estilo Gemini / ChatGPT */}
+        {isSidebarOpen && (
+          <div className="absolute left-0 top-[60px] bottom-0 w-64 bg-slate-900/95 backdrop-blur-md text-white border-r border-slate-800 z-20 p-3 flex flex-col justify-between animate-slideRight">
+            <div>
+              <div className="flex items-center justify-between mb-3 border-b border-slate-800 pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-sana-400 flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" />
+                  Historial de Chats
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="h-6 w-6 text-slate-400 hover:text-white"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <Button
+                onClick={() => {
+                  handleStartNewSession();
+                  setIsSidebarOpen(false);
+                }}
+                className="w-full bg-sana-600 hover:bg-sana-700 text-white text-xs font-bold mb-3 flex items-center gap-1.5 justify-center"
+              >
+                <PlusCircle className="h-3.5 w-3.5" />
+                + Nueva Consulta
+              </Button>
+
+              <div className="space-y-1 overflow-y-auto max-h-[400px] pr-1">
+                {sessions.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 italic p-2">Sin consultas previas guardadas.</p>
+                ) : (
+                  sessions.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        handleSelectSession(s.id);
+                        setIsSidebarOpen(false);
+                      }}
+                      className={`w-full text-left p-2 rounded text-xs transition-colors flex items-center gap-2 ${
+                        sessionId === s.id
+                          ? "bg-sana-700 text-white font-semibold"
+                          : "hover:bg-slate-800 text-slate-300"
+                      }`}
+                    >
+                      <MessageCircle className="h-3.5 w-3.5 shrink-0 text-sana-400" />
+                      <span className="truncate">{s.title || "Consulta médica"}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-slate-800 pt-2 text-[10px] text-slate-400 text-center">
+              Guardado en Supabase / LocalStorage
+            </div>
+          </div>
+        )}
 
         {/* Messages area */}
         <CardContent className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/55 dark:bg-slate-950/20">
@@ -317,10 +540,11 @@ export function AgentChatPlaceholder() {
               className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs shadow-xs relative group ${msg.role === "user"
-                  ? "bg-sana-600 text-white rounded-br-none"
-                  : "bg-white dark:bg-slate-900 text-foreground rounded-bl-none border border-sana-100 dark:border-slate-800"
-                  }`}
+                className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs shadow-xs relative group ${
+                  msg.role === "user"
+                    ? "bg-sana-600 text-white rounded-br-none"
+                    : "bg-white dark:bg-slate-900 text-foreground rounded-bl-none border border-sana-100 dark:border-slate-800"
+                }`}
               >
                 <p className="whitespace-pre-line leading-relaxed">{msg.content}</p>
 
@@ -339,7 +563,7 @@ export function AgentChatPlaceholder() {
                 )}
               </div>
               <span className="text-[9px] text-muted-foreground mt-1 px-1">
-                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
               </span>
             </div>
           ))}
@@ -348,28 +572,35 @@ export function AgentChatPlaceholder() {
             <div className="flex items-start">
               <div className="bg-white dark:bg-slate-900 border border-sana-100 dark:border-slate-800 rounded-2xl rounded-bl-none px-4 py-3 shadow-xs">
                 <div className="flex space-x-1.5 items-center h-4">
-                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 bg-sana-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
               </div>
             </div>
           )}
 
-          {/* Suggested actions */}
+          {/* Suggested actions (Destacando botones de Hospital Público / Privado) */}
           {suggestedActions.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 pt-2">
-              {suggestedActions.map((action, idx) => (
-                <Button
-                  key={idx}
-                  variant="outline"
-                  size="sm"
-                  className="bg-white hover:bg-sana-50 dark:bg-slate-900 dark:hover:bg-slate-850 border-sana-200 dark:border-slate-800 text-sana-700 dark:text-slate-350 text-[11px] font-semibold rounded-full shadow-xs transition-colors"
-                  onClick={() => handleSuggestedAction(action)}
-                >
-                  {action.label}
-                </Button>
-              ))}
+            <div className="flex flex-wrap gap-2 pt-2">
+              {suggestedActions.map((action, idx) => {
+                const isSpecial = action.type === "select_hospital_type";
+                return (
+                  <Button
+                    key={idx}
+                    variant={isSpecial ? "default" : "outline"}
+                    size="sm"
+                    className={`text-[11px] font-bold rounded-full shadow-xs transition-all ${
+                      isSpecial
+                        ? "bg-sana-600 hover:bg-sana-700 text-white border-none px-4 py-1.5 scale-105"
+                        : "bg-white hover:bg-sana-50 dark:bg-slate-900 dark:hover:bg-slate-850 border-sana-200 dark:border-slate-800 text-sana-700 dark:text-slate-350"
+                    }`}
+                    onClick={() => handleSuggestedAction(action)}
+                  >
+                    {action.label}
+                  </Button>
+                );
+              })}
             </div>
           )}
 
@@ -399,7 +630,7 @@ export function AgentChatPlaceholder() {
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isRecording ? "Escuchando..." : "Escribe aquí... saluda, describe síntomas o pide ayuda"}
+              placeholder={isRecording ? "Escuchando..." : "Escribe aquí... describe síntomas o pide ayuda"}
               className="flex-1 text-xs border-sana-200 dark:border-slate-800 focus-visible:ring-sana-500 bg-card text-foreground"
               disabled={isRecording}
             />
@@ -516,7 +747,11 @@ export function AgentChatPlaceholder() {
               {/* Generate infographic action shortcut */}
               {triageData.presumptiveDiagnosis && (
                 <Button
-                  onClick={() => triggerFalGeneration(`Triage clínico: ${triageData.severity}. Diagnóstico: ${triageData.presumptiveDiagnosis}. Escala de Dolor: ${triageData.painIndex}/10 de tipo ${triageData.painType}. Comidas consumidas: ${triageData.foods}.`)}
+                  onClick={() =>
+                    triggerFalGeneration(
+                      `Triage clínico: ${triageData.severity}. Diagnóstico: ${triageData.presumptiveDiagnosis}. Escala de Dolor: ${triageData.painIndex}/10 de tipo ${triageData.painType}. Comidas consumidas: ${triageData.foods}.`
+                    )
+                  }
                   className="w-full mt-2 bg-gradient-to-r from-sana-600 to-sana-700 hover:from-sana-700 hover:to-sana-800 text-white text-xs font-bold py-2 shadow-md flex gap-2 items-center justify-center rounded-xl transition-all duration-300"
                 >
                   <Sparkles className="h-4 w-4" />
